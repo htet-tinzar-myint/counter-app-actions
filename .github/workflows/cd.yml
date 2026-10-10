@@ -1,0 +1,103 @@
+# CD：main へのマージ（push）で実行
+#   1. publish : 2つのイメージをビルドし、GitHub Container Registry（GHCR）に公開
+#                タグはコミット SHA
+#   2. verify  : 公開したイメージを取得して起動し、スモークテスト
+#                （本番で使うのと同じイメージが動くことを確認する）
+#                成功したら latest を付け替える
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cd-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [counting-service, dashboard-service]
+    steps:
+      - uses: actions/checkout@v7
+
+      # GHCR のイメージ名は小文字のみ
+      - name: Set image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.service }}" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build & push
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            -t "$IMAGE:${{ github.sha }}" \
+            services/${{ matrix.service }}
+          docker push "$IMAGE:${{ github.sha }}"
+
+  verify:
+    name: Verify published images
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set image names
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "COUNTING_IMAGE=ghcr.io/$OWNER/counting-service:${{ github.sha }}"   >> "$GITHUB_ENV"
+          echo "DASHBOARD_IMAGE=ghcr.io/$OWNER/dashboard-service:${{ github.sha }}" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull & start published images
+        run: |
+          docker compose pull
+          docker compose up -d --no-build
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Smoke test
+        run: |
+          pip install websocket-client
+          python scripts/smoke_test.py http://localhost:8080
+
+      # スモークテストが成功したイメージだけを latest にする
+      - name: Promote to latest
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          for svc in counting-service dashboard-service; do
+            img="ghcr.io/$OWNER/$svc"
+            docker buildx imagetools create -t "$img:latest" "$img:${{ github.sha }}"
+          done
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published images"
+            echo ""
+            echo "- \`$COUNTING_IMAGE\`"
+            echo "- \`$DASHBOARD_IMAGE\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop services
+        if: always()
+        run: docker compose down

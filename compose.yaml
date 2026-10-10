@@ -1,0 +1,21 @@
+# 2つのサービスをまとめて起動する定義（ローカル・CI・CD で共通）
+#   ローカル / CI : docker compose up -d --build        （その場でビルド）
+#   CD            : COUNTING_IMAGE=... DASHBOARD_IMAGE=... docker compose up -d --no-build
+#                   （GHCR に公開したイメージをそのまま使う）
+services:
+  counting:
+    image: ${COUNTING_IMAGE:-counting-service:local}
+    build: ./services/counting-service
+    environment:
+      PORT: "9003"
+
+  dashboard:
+    image: ${DASHBOARD_IMAGE:-dashboard-service:local}
+    build: ./services/dashboard-service
+    environment:
+      PORT: "9002"
+      COUNTING_SERVICE_URL: http://counting:9003
+    ports:
+      - "8080:9002"   # ホストの 8080 → コンテナの 9002
+    depends_on:
+      - counting
