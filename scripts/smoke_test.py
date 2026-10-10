@@ -11,6 +11,7 @@
 """
 
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -64,10 +65,35 @@ def wait_for_count(base_url: str, timeout_sec: int = 30) -> dict:
     raise SystemExit("NG  no count received (dashboard cannot reach counting-service?)")
 
 
+def report_to_github(base_url: str, payload: dict) -> None:
+    """GitHub Actions 上で実行されたときだけ、結果を実行画面に表示する。
+
+    - ::notice::        → 実行画面の上部（Annotations）に緑のメッセージ
+    - GITHUB_STEP_SUMMARY → 実行画面の Summary に結果の表
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    print(f"::notice title=Smoke test passed::dashboard → counting OK (count={payload['count']})")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    with open(summary_path, "a", encoding="utf-8") as f:
+        f.write("### ✅ Smoke test passed\n\n")
+        f.write("| 項目 | 結果 |\n| --- | --- |\n")
+        f.write(f"| dashboard URL | `{base_url}` |\n")
+        f.write("| /health | 200 OK |\n")
+        f.write("| dashboard → counting | OK |\n")
+        f.write(f"| count | `{payload['count']}` |\n")
+        f.write(f"| counting hostname | `{payload.get('hostname', '-')}` |\n\n")
+        f.write("<details><summary>WebSocket で受信したデータ</summary>\n\n")
+        f.write(f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n</details>\n\n")
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         raise SystemExit("usage: smoke_test.py <dashboard base URL>")
     base = sys.argv[1].rstrip("/")
     wait_for_health(base)
-    wait_for_count(base)
+    result = wait_for_count(base)
+    report_to_github(base, result)
     print("Smoke test passed")

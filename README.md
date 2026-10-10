@@ -34,7 +34,8 @@
 │   └── dashboard-service/  Dockerfile, bin/dashboard-service
 ├── compose.yaml            2サービスをまとめて起動する定義（ローカル・CI・CD 共通）
 ├── scripts/
-│   └── smoke_test.py       dashboard に WebSocket で接続し、count が届くか確認
+│   ├── smoke_test.py       dashboard に WebSocket で接続し、count が届くか確認（結果を Summary に表示）
+│   └── screenshot.py       dashboard の画面を撮影し、Artifact として保存
 └── .github/workflows/
     ├── ci.yml              PR 時：ビルド → 起動 → スモークテスト
     └── cd.yml              main 反映時：GHCR に公開 → 公開イメージで再テスト

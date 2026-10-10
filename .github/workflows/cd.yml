@@ -76,6 +76,19 @@ jobs:
           pip install websocket-client
           python scripts/smoke_test.py http://localhost:8080
 
+      # ランナーの画面はブラウザで見られないので、スクリーンショットを Artifact に保存する
+      - name: Screenshot dashboard
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+          python scripts/screenshot.py http://localhost:8080 dashboard.png
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-screenshot
+          path: dashboard.png
+
       # スモークテストが成功したイメージだけを latest にする
       - name: Promote to latest
         run: |
